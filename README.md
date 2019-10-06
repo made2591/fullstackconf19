@@ -2,13 +2,13 @@
 
 This is out full stack solution to code from everywhere using Visual Code Studio. Many thanks to [github.com/cdr/code-server](https://github.com/cdr/code-server).
 
-- [https://github.com/made2591/fullstackconf19/blob/master/speech/speech.pdf](https://github.com/made2591/fullstackconf19/blob/master/speech/speech.pdf) you can find a brief explanation of repo content.
+- [https://github.com/made2591/fullstackconf19/blob/master/speech/speech.pdf](https://github.com/made2591/fullstackconf19/blob/master/slides/speech.pdf) you can find a brief explanation of repo content.
 - [https://madeddu.xyz/posts/aws/cloudformation/traefik-single-to-multi-tenant/](https://madeddu.xyz/posts/aws/cloudformation/traefik-single-to-multi-tenant/) you can find a blog post about original template.
 - [https://madeddu.xyz/posts/aws/cloudformation/immutable-vsc/](https://madeddu.xyz/posts/aws/cloudformation/immutable-vsc/) you can find a blog post about multitenancy template.
 
 ## Architecture schemas
 
-![](https://github.com/made2591/fullstackconf19/blob/master/speech/img/architecture.png)
+![](https://github.com/made2591/fullstackconf19/blob/master/slides/img/architecture.png)
 
 ## Requirements
 
