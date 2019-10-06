@@ -1,0 +1,298 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  "AWS template to deploy EC2 code server instance"
+
+Parameters:
+  AmiId:
+    Type : "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-ebs"
+    Description: "Base ami"
+  VpcId:
+    Type: "AWS::EC2::VPC::Id"
+    Description: "Enter a valid vpc identifier."
+  SubnetId:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "Enter a valid (public) subnet identifier."
+  ExposedPort:
+    Type: Number
+    Description: "Enter the port used to expose the service."
+    Default: 443
+  SourceIp:
+    Type: String
+    Description: "Enter the IP allowed to reach the exposed service (it's strongly suggested to put IP restriction)."
+    Default: "0.0.0.0/0"
+  CertificateParameterName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: "Enter the name of the parameter that contains the certificate (this parameter must be created before creation of the stack)."
+  PrivateKeyParameterName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: "Enter the name of the parameter that contains the private key (this parameter must be created before creation of the stack)."
+  InstanceFamily:
+    Type: String
+    Description: "Enter the family type of your instance (too small instances will run in failure more frequently)."
+    Default: "t3.small"
+  RootVolumeDimension:
+    Type: Number
+    Description: "Enter the dimension of the root volume."
+    Default: 30
+  EbsVolumeId:
+    Type: AWS::EC2::Volume::Id
+    Description: "Enter the volume ID to attach to the instance."
+  KeyPairName:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: "Enter the name of the key pair you want attach to the instance (this key need to be created before creation of the stack)."
+    Default: "codeserver"
+  DomainName:
+    Type: String
+    Description: "Enter the domain to expose the service."
+  HostedZoneId:
+    Type: "AWS::Route53::HostedZone::Id"
+    Description: "Enter a valid Hosted Zone name for record set to expose the service."
+  UserId:
+    Type: String
+    Description: "Enter the Button ID or any other user ID."
+    Type: String
+  AppPassword:
+    NoEcho: true
+    Type: String
+    Description: "Enter the password to access codeserver."
+    MinLength: 12
+    MaxLength: 41
+    AllowedPattern: "^[a-zA-Z0-9]*$"
+  EmailSenderCustomResourceArn:
+    Type: String
+    Description: "Enter the ARN of the Custom Resource to send email from CloudFormation"
+  EmailSenderAddress:
+    Type: String
+    Description: "Enter the ARN of the Custom Resource to send email from CloudFormation"
+  DeveloperEmail:
+    Type: String
+    Description: "Enter the ARN of the Custom Resource to send email from CloudFormation"
+
+Resources:
+  CodeServerPublicAccessSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ " ", [ "Public access to the instance", !Ref UserId ] ]
+      GroupDescription: !Join [ " ", [ "Public access to the instance", !Ref UserId ] ]
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ExposedPort
+          ToPort: !Ref ExposedPort
+          CidrIp: !Ref SourceIp
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SourceIp
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  CodeServerPublicInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  CodeServerPublicInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref CodeServerPublicInstanceRole
+
+  CodeServerPublicInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref CodeServerPublicInstanceProfile
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceFamily
+      EbsOptimized: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeDimension
+      Monitoring: false
+      SecurityGroupIds:
+        - !Ref CodeServerPublicAccessSg
+      SubnetId: !Ref SubnetId
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+            - ""
+            - - "#!/bin/bash -xe\n"
+              - "/opt/aws/bin/cfn-init -v "
+              - "         --stack "
+              - !Ref AWS::StackName
+              - "         --resource CodeServerPublicInstance"
+              - "         --configsets end-to-end"
+              - "         --region "
+              - !Ref AWS::Region
+              - "\n"
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          end-to-end:
+            - Install
+            - Setup
+            - Service
+        Install:
+          packages:
+            yum:
+              docker: []
+              wget: []
+              gzip: []
+              git: []
+        Setup:
+          files:
+            "/etc/pki/CA/private/cert1.pem":
+              content:
+                Fn::Join:
+                  - ""
+                  - - ""
+                    - !Ref CertificateParameterName
+              mode: "000600"
+              owner: root
+              group: root
+            "/etc/pki/CA/private/privkey1.pem":
+              content:
+                Fn::Join:
+                  - ""
+                  - - ""
+                    - !Ref PrivateKeyParameterName
+              mode: "000600"
+              owner: root
+              group: root
+          commands:
+            00-ssm-setup:
+              command: yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm && systemctl start amazon-ssm-agent
+              cwd: "~"
+            01-update-upgrade:
+              command: yum update -y && yum upgrade -y
+              cwd: "~"
+            02-wget:
+              command: wget https://github.com/cdr/code-server/releases/download/1.1156-vsc1.33.1/code-server1.1156-vsc1.33.1-linux-x64.tar.gz
+              cwd: "~"
+            03-untar-cleanup:
+              command: tar -xvzf code-server1.1156-vsc1.33.1-linux-x64.tar.gz && cp code-server1.1156-vsc1.33.1-linux-x64/code-server /usr/bin/ && rm -rf code-server1.1156-vsc1.33.1-linux-x64*
+              cwd: "~"
+            04-chmod-bin:
+              command: chmod +x /usr/bin/code-server
+              cwd: "~"
+        Service:
+          commands:
+            05-service-creation:
+              command: !Sub |
+                cat <<EOF >> /lib/systemd/system/code-server.service
+                [Unit]
+                Description= Visual Studio Code Server.
+
+                [Service]
+                Environment="PASSWORD=${AppPassword}"
+                Type=simple
+                Restart=always
+                RestartSec=5s
+                ExecStart=/usr/bin/code-server /mnt/workspace --disable-telemetry --port ${ExposedPort} --cert=/etc/pki/CA/private/cert1.pem --cert-key=/etc/pki/CA/private/privkey1.pem
+
+                [Install]
+                WantedBy=multi-user.target
+                EOF
+              cwd: "~"
+            06-chmod-service:
+              command: "chmod 644 /lib/systemd/system/code-server.service"
+              cwd: "~"
+            07-systemctl-reload:
+              command: "systemctl --system daemon-reload"
+              cwd: "~"
+            08-systemctl-enable:
+              command: "systemctl enable code-server"
+              cwd: "~"
+            09-mount-volume:
+              command: !Sub |
+                mkdir -p /mnt/workspace
+                while [ ! -b $(readlink -f /dev/sdf) ]; do echo "waiting for device /dev/sdf"; sleep 5 ; done
+                if [ -z "$(blkid -o value -s TYPE /dev/sdf)" ]; then
+                  blkid $(readlink -f /dev/sdf) || mkfs -t ext4 $(readlink -f /dev/sdf)
+                fi
+                blkid $(readlink -f /dev/sdf) || mkfs -t ext4 $(readlink -f /dev/sdf)
+                e2label $(readlink -f /dev/sdf) workspace
+                sed  -e '/^[\/][^ \t]*[ \t]*\/var\/mqm[ \t]/d' /etc/fstab
+                grep -q ^LABEL=workspace /etc/fstab || echo 'LABEL=workspace /mnt/workspace ext4 defaults' >> /etc/fstab
+                grep -q "^$(readlink -f /dev/sdf) /mnt/workspace " /proc/mounts || mount /mnt/workspace
+              cwd: "~"
+            10-systemctl-start:
+              command: "systemctl start code-server"
+              cwd: "~"
+            11-systemctl-status:
+              command: "systemctl status code-server"
+              cwd: "~"
+            12-umount-hook:
+              command: !Sub |
+                cat <<EOF >> /etc/rc0.d/S01ec2-termination
+                #!/bin/bash
+                sudo /bin/umount -a
+                exit 0
+                EOF
+              cwd: "~"
+          services:
+            sysvinit:
+              code-server:
+                enabled: "true"
+                ensureRunning: "true"
+
+  CodeServerEBSVolume:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref CodeServerPublicInstance
+      VolumeId: !Ref EbsVolumeId
+
+  CodeServerPublicInstanceRecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: HostedZoneId
+      Comment: !Join [ " ", [ "Code server public instance domain name", !Ref UserId ] ]
+      Name:
+        Fn::Join:
+          - ""
+          - - !Ref CodeServerPublicInstance
+            - "."
+            - !Ref DomainName
+            - "."
+      Type: A
+      TTL: "60"
+      ResourceRecords:
+        - Fn::GetAtt:
+            - CodeServerPublicInstance
+            - PublicIp
+
+  SendEmail:
+    Type: "Custom::SendEmail"
+    Properties:
+      ServiceToken: !Ref EmailSenderCustomResourceArn
+      EmailFrom: !Ref EmailSenderAddress
+      EmailTo: !Ref DeveloperEmail
+      InitEmailSubject: "Your new environment!"
+      InitEmailBody: !Sub "Hi!\n\nYour environment is ready at: https://${CodeServerPublicInstance}.${DomainName}\nThe password to access the instance is: ${AppPassword}\n\nHappy coding!\n\nCodeServer - FullStackConf '19"
+      DeletionEmailSubject: "About your environment"
+      DeletionEmailBody: !Sub "Hi!\n\nYour environment, previously reachable at: https://${CodeServerPublicInstance}.${DomainName}, has been shut down.\nWe hope you had fun and you enjoyed it!\n\nSee you soon!\n\nCodeServer - FullStackConf '19"
+
+Outputs:
+  PublicDNS:
+    Value:
+      Fn::Join:
+        - ""
+        - - !Ref CodeServerPublicInstance
+          - "."
+          - !Ref DomainName

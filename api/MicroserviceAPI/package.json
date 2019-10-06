@@ -1,0 +1,16 @@
+{
+  "name": "microserviceapi",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.535.0",
+    "lambda-api": "^0.10.2",
+    "lodash": "^4.17.15"
+  }
+}
